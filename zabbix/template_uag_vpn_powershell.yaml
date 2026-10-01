@@ -1,0 +1,339 @@
+zabbix_export:
+  version: '7.0'
+  template_groups:
+    - uuid: 95b7b1bb03cf4698b22e352f06eb95a4
+      name: Templates/Applications
+  templates:
+    - uuid: 39234d936da54206b7a8526cf5c8a34b
+      template: 'UAG VPN Tunnel by PowerShell probe'
+      name: 'UAG VPN Tunnel by PowerShell probe'
+      description: |
+        Health check of Workspace ONE Tunnel gateways (UAG) from the Internet: TCP + TLS handshake on 443, through an HTTP proxy.
+        Results are produced every 5 min by Check-VpnTunnel.ps1 (Windows scheduled task) in a JSON file
+        read by the Zabbix agent of the server (vfs.file.contents). Link it to the Windows host that runs the script.
+        Status values: 1 = OK, 0 = KO, 2 = not tested (proxy unreachable) / proxy not used.
+      groups:
+        - name: Templates/Applications
+      items:
+        - uuid: d464c165e7b14f10abbe86285fd369fe
+          name: 'UAG VPN: raw probe results'
+          key: 'vfs.file.contents[{$UAG.VPN.FILE},UTF-8]'
+          history: '0'
+          value_type: TEXT
+          trends: '0'
+          description: |
+            JSON content written by Check-VpnTunnel.ps1. "Discard unchanged": a value only arrives when the script actually ran
+            (the JSON contains a timestamp), which lets nodata() detect a stopped probe.
+            If the agent runs in active mode only, change the type of this item to "Zabbix agent (active)".
+          preprocessing:
+            - type: DISCARD_UNCHANGED
+          tags:
+            - tag: component
+              value: vpn
+            - tag: component
+              value: raw
+        - uuid: dd81fc2fa5b54de9995fce3b8ef9e3b9
+          name: 'UAG VPN: last probe run'
+          type: DEPENDENT
+          key: uag.vpn.last_run
+          delay: '0'
+          history: 7d
+          units: unixtime
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.timestamp
+          master_item:
+            key: 'vfs.file.contents[{$UAG.VPN.FILE},UTF-8]'
+          tags:
+            - tag: component
+              value: vpn
+          triggers:
+            - uuid: dfed70b00bae4bfaab7a2d79e7238a09
+              expression: 'nodata(/UAG VPN Tunnel by PowerShell probe/uag.vpn.last_run,{$UAG.VPN.NODATA})=1'
+              name: 'VPN probe: no results for {$UAG.VPN.NODATA}'
+              priority: HIGH
+              description: 'Check-VpnTunnel.ps1 has not produced any recent result: scheduled task stopped or disabled, script failing, server down or Zabbix agent unreachable. The VPN gateways are no longer monitored.'
+              tags:
+                - tag: scope
+                  value: availability
+        - uuid: 2a55be13aecc43a384a7d23458d1af14
+          name: 'UAG VPN: probe run duration'
+          type: DEPENDENT
+          key: uag.vpn.duration
+          delay: '0'
+          history: 7d
+          units: ms
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.duration_ms
+          master_item:
+            key: 'vfs.file.contents[{$UAG.VPN.FILE},UTF-8]'
+          tags:
+            - tag: component
+              value: vpn
+        - uuid: 5e28daa5e402419f95859e5bf2b3e78c
+          name: 'UAG VPN: probe error'
+          type: DEPENDENT
+          key: uag.vpn.probe.error
+          delay: '0'
+          history: 7d
+          value_type: TEXT
+          trends: '0'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.probe_error
+          master_item:
+            key: 'vfs.file.contents[{$UAG.VPN.FILE},UTF-8]'
+          tags:
+            - tag: component
+              value: vpn
+          triggers:
+            - uuid: 679f3dee5797433bb4d83046fe80a4fd
+              expression: 'length(last(/UAG VPN Tunnel by PowerShell probe/uag.vpn.probe.error))>0'
+              name: 'VPN probe: configuration error'
+              opdata: '{ITEM.LASTVALUE1}'
+              priority: AVERAGE
+              description: 'The script cannot test the VPN gateways (invalid config.env, empty VPN_TARGETS...). See the log in logs\ on the server.'
+              tags:
+                - tag: scope
+                  value: availability
+        - uuid: cfcd6e33520c4eeebfab99305361e97f
+          name: 'UAG VPN: Internet proxy status'
+          type: DEPENDENT
+          key: uag.vpn.proxy.status
+          delay: '0'
+          history: 31d
+          valuemap:
+            name: 'UAG VPN status'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.proxy.status
+          master_item:
+            key: 'vfs.file.contents[{$UAG.VPN.FILE},UTF-8]'
+          tags:
+            - tag: component
+              value: vpn
+            - tag: component
+              value: proxy
+          triggers:
+            - uuid: 412c545d6cf34538975777818a0cb2ea
+              expression: 'last(/UAG VPN Tunnel by PowerShell probe/uag.vpn.proxy.status)=0'
+              name: 'VPN probe: Internet proxy unreachable, VPN tests suspended'
+              opdata: '{ITEM.LASTVALUE1}'
+              priority: HIGH
+              description: 'The probe cannot reach the Internet proxy: the actual VPN status is unknown ("Not tested" status). See the "UAG VPN: proxy error" item.'
+              dependencies:
+                - name: 'VPN probe: no results for {$UAG.VPN.NODATA}'
+                  expression: 'nodata(/UAG VPN Tunnel by PowerShell probe/uag.vpn.last_run,{$UAG.VPN.NODATA})=1'
+              tags:
+                - tag: scope
+                  value: availability
+        - uuid: 6cd8365a70f54b459a227deab730ff1a
+          name: 'UAG VPN: proxy error'
+          type: DEPENDENT
+          key: uag.vpn.proxy.error
+          delay: '0'
+          history: 7d
+          value_type: TEXT
+          trends: '0'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.proxy.error
+          master_item:
+            key: 'vfs.file.contents[{$UAG.VPN.FILE},UTF-8]'
+          tags:
+            - tag: component
+              value: vpn
+            - tag: component
+              value: proxy
+      discovery_rules:
+        - uuid: 0a4a3a94eece4e6ab4e645a9fed85414
+          name: 'UAG gateway discovery'
+          type: DEPENDENT
+          key: uag.vpn.discovery
+          delay: '0'
+          lifetime: 1d
+          enabled_lifetime_type: DISABLE_IMMEDIATELY
+          description: 'One entry per VPN_TARGETS target (config.env). A removed target switches to "Not tested" (its DOWN problem is closed), is disabled immediately, then deleted after 1 day.'
+          item_prototypes:
+            - uuid: 4f97f50de1e9410b98dc22a51a2ed503
+              name: 'VPN {#TARGET}: status'
+              type: DEPENDENT
+              key: 'uag.vpn.status[{#TARGET}]'
+              delay: '0'
+              history: 31d
+              valuemap:
+                name: 'UAG VPN status'
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$.targets[?(@.target == "{#TARGET}")].status.first()'
+                  error_handler: CUSTOM_VALUE
+                  error_handler_params: '2'
+              master_item:
+                key: 'vfs.file.contents[{$UAG.VPN.FILE},UTF-8]'
+              tags:
+                - tag: component
+                  value: vpn
+                - tag: target
+                  value: '{#TARGET}'
+              trigger_prototypes:
+                - uuid: 960bd76aadd04ef0acd6a20587f8a6a6
+                  expression: 'last(/UAG VPN Tunnel by PowerShell probe/uag.vpn.status[{#TARGET}])=0'
+                  name: 'VPN {#TARGET} unreachable from the Internet'
+                  priority: DISASTER
+                  description: 'TCP connection or TLS handshake to the gateway failed after all script attempts. Details are in the "VPN {#TARGET}: error" item.'
+                  dependencies:
+                    - name: 'VPN probe: Internet proxy unreachable, VPN tests suspended'
+                      expression: 'last(/UAG VPN Tunnel by PowerShell probe/uag.vpn.proxy.status)=0'
+                    - name: 'VPN probe: no results for {$UAG.VPN.NODATA}'
+                      expression: 'nodata(/UAG VPN Tunnel by PowerShell probe/uag.vpn.last_run,{$UAG.VPN.NODATA})=1'
+                  tags:
+                    - tag: scope
+                      value: availability
+            - uuid: f6efaf37e89741b398e5017172dbf6bc
+              name: 'VPN {#TARGET}: TLS latency'
+              type: DEPENDENT
+              key: 'uag.vpn.latency[{#TARGET}]'
+              delay: '0'
+              history: 31d
+              units: ms
+              description: 'Connection time (+ CONNECT through the proxy) + TLS handshake. No value while the target is down.'
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$.targets[?(@.target == "{#TARGET}")].latency_ms.first()'
+                  error_handler: DISCARD_VALUE
+                - type: IN_RANGE
+                  parameters:
+                    - '0'
+                    - ''
+                  error_handler: DISCARD_VALUE
+              master_item:
+                key: 'vfs.file.contents[{$UAG.VPN.FILE},UTF-8]'
+              tags:
+                - tag: component
+                  value: vpn
+                - tag: target
+                  value: '{#TARGET}'
+            - uuid: 2812562b3a4b4a118ae9feef596327fa
+              name: 'VPN {#TARGET}: days until certificate expiry'
+              type: DEPENDENT
+              key: 'uag.vpn.cert.days[{#TARGET}]'
+              delay: '0'
+              history: 31d
+              units: days
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$.targets[?(@.target == "{#TARGET}")].cert_days.first()'
+                  error_handler: DISCARD_VALUE
+                - type: IN_RANGE
+                  parameters:
+                    - '0'
+                    - ''
+                  error_handler: DISCARD_VALUE
+              master_item:
+                key: 'vfs.file.contents[{$UAG.VPN.FILE},UTF-8]'
+              tags:
+                - tag: component
+                  value: vpn
+                - tag: target
+                  value: '{#TARGET}'
+              trigger_prototypes:
+                - uuid: 135e91f0e844436ba6dfb163289e3d66
+                  expression: 'last(/UAG VPN Tunnel by PowerShell probe/uag.vpn.cert.days[{#TARGET}])<{$UAG.VPN.CERT.WARN}'
+                  name: 'VPN {#TARGET}: certificate expires in less than {$UAG.VPN.CERT.WARN} days'
+                  opdata: 'Expires in {ITEM.LASTVALUE1}'
+                  priority: WARNING
+                  tags:
+                    - tag: scope
+                      value: notice
+            - uuid: 69b7ffd492ba4f31b55a96040ddd3f8c
+              name: 'VPN {#TARGET}: TLS version'
+              type: DEPENDENT
+              key: 'uag.vpn.tls_version[{#TARGET}]'
+              delay: '0'
+              history: 7d
+              value_type: CHAR
+              trends: '0'
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$.targets[?(@.target == "{#TARGET}")].tls_version.first()'
+                  error_handler: DISCARD_VALUE
+              master_item:
+                key: 'vfs.file.contents[{$UAG.VPN.FILE},UTF-8]'
+              tags:
+                - tag: component
+                  value: vpn
+                - tag: target
+                  value: '{#TARGET}'
+            - uuid: d74b5a0f1e1e49e2afeab786cd9a0d54
+              name: 'VPN {#TARGET}: error'
+              type: DEPENDENT
+              key: 'uag.vpn.error[{#TARGET}]'
+              delay: '0'
+              history: 7d
+              value_type: TEXT
+              trends: '0'
+              description: 'Details of the last failure (empty when OK).'
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$.targets[?(@.target == "{#TARGET}")].error.first()'
+                  error_handler: DISCARD_VALUE
+              master_item:
+                key: 'vfs.file.contents[{$UAG.VPN.FILE},UTF-8]'
+              tags:
+                - tag: component
+                  value: vpn
+                - tag: target
+                  value: '{#TARGET}'
+          graph_prototypes:
+            - uuid: 05b63bc52de34298b35028a48e633827
+              name: 'VPN {#TARGET}: TLS latency'
+              graph_items:
+                - color: 1A7C11
+                  item:
+                    host: 'UAG VPN Tunnel by PowerShell probe'
+                    key: 'uag.vpn.latency[{#TARGET}]'
+          master_item:
+            key: 'vfs.file.contents[{$UAG.VPN.FILE},UTF-8]'
+          lld_macro_paths:
+            - lld_macro: '{#TARGET}'
+              path: $.target
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.targets
+      tags:
+        - tag: class
+          value: network
+        - tag: target
+          value: vpn
+      macros:
+        - macro: '{$UAG.VPN.CERT.WARN}'
+          value: '14'
+          description: 'Alert threshold (days) before certificate expiry.'
+        - macro: '{$UAG.VPN.FILE}'
+          value: 'C:\VpnMonitor\state\zabbix.json'
+          description: 'Path of the JSON written by Check-VpnTunnel.ps1 (ZABBIX_FILE).'
+        - macro: '{$UAG.VPN.NODATA}'
+          value: 15m
+          description: 'Time without a new result before the "silent probe" alert (3 missed runs).'
+      valuemaps:
+        - uuid: ee83aab44ee642b68473c5eb7204587c
+          name: 'UAG VPN status'
+          mappings:
+            - value: '0'
+              newvalue: KO
+            - value: '1'
+              newvalue: OK
+            - value: '2'
+              newvalue: 'Not tested'

@@ -1,0 +1,6 @@
+config.env
+state/
+logs/
+*.tmp
+.DS_Store
+docker/
